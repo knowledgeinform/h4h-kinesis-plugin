@@ -1,0 +1,41 @@
+<resources>
+    <string name="app_name">Kinesis Demo Plugin</string>
+    <string name="service_description">Creates Demo Nodes on the Kinesis Network</string>
+    <string name="version_label">Kinesis Demo Version:</string>
+    <string name="channel_name">Kinesis Demo Notification</string>
+    <string name="channel_description">Kinesis Demo Notifications</string>
+    <string name="configuration_label">Kinesis Demo Activity</string>
+    <string name="activity_name">Kinesis Demo Activity</string>
+    <string name="h4h_activity_name">Kinesis H4H Activity</string>
+
+    <string name="platform_name">Platform Name</string>
+    <string name="ip_address">KxM IP Address</string>
+    <string name="cam_address">Optional Camera URL (rtsp://192.168.168.112:8900/live) </string>
+    <string name="colon">:</string>
+    <string name="oneID">Platform 1</string>
+    <string name="twoID">Platform 2</string>
+    <string name="threeID">Platform 3</string>
+    <string name="fourID">Platform 4</string>
+    <string name="fiveID">Platform 5</string>
+    <string name="sixID">Platform 6</string>
+    <string name="sevenID">Platform 7</string>
+    <string name="eightID">Platform 8</string>
+    <string name="waiting">Waiting…</string>
+    <string name="start">START</string>
+    <string name="controlPort">Control Port</string>
+    <string name="statusPort">Status Port</string>
+    <string name="statusConn">Status Connection: </string>
+    <string name="add_uxv">Add UxV</string>
+    <string name="started">Started</string>
+    <string name="stop">STOP</string>
+    <string name="kxm_ip">192.168.168.20</string>
+    <string name="teal_cam_url">rtsp://192.168.168.30:8555/video200-klv</string>
+
+    <string-array name="uxv_types">
+        <item>UGV</item>
+        <item>UAV</item>
+        <item>Quadruped</item>
+        <item>Manipulator</item>
+    </string-array>
+
+</resources>

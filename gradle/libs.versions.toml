@@ -1,0 +1,24 @@
+[versions]
+agp = "8.8.0"
+appcompat = "1.7.0"
+constraintlayout = "2.2.0"
+coreKtx = "1.15.0"
+gson = "2.11.0"
+securityCrypto = "1.0.0"
+kotlin = "2.1.0"
+sonar = "6.0.1.5171"
+
+
+[libraries]
+androidx-appcompat = { module = "androidx.appcompat:appcompat", version.ref = "appcompat" }
+androidx-constraintlayout = { module = "androidx.constraintlayout:constraintlayout", version.ref = "constraintlayout" }
+androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "coreKtx" }
+androidx-security-crypto = { module = "androidx.security:security-crypto", version.ref = "securityCrypto" }
+gson = { module = "com.google.code.gson:gson", version.ref = "gson" }
+
+[plugins]
+android-application = { id = "com.android.application", version.ref = "agp" }
+kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
+sonarqube = { id = "org.sonarqube", version.ref = "sonar" }
+
+

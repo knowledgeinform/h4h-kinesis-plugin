@@ -1,0 +1,95 @@
+plugins {
+    alias(libs.plugins.android.application)
+    alias(libs.plugins.kotlin.android)
+    alias(libs.plugins.sonarqube)
+}
+
+
+sonarqube {
+    properties {
+        property "sonar.projectKey", "Kinesis_Sales_Demo_Java"
+        property "sonar.projectName", "Kinesis_Sales_Demo_Java"
+        property "sonar.exclusions", "**/data/*.xml"
+    }
+}
+
+android {
+    namespace 'com.tomahawkrobotics.kinesis.plugins.salesdemo'
+
+    compileSdk 35
+
+    defaultConfig {
+        applicationId "com.tomahawkrobotics.kinesis.plugins.salesdemo"
+        minSdk 29
+        targetSdk 33
+        versionCode 1
+        versionName "1.0"
+        externalNativeBuild {
+            cmake {
+                arguments "-DANDROID_TOOLCHAIN=clang"
+                cppFlags "-std=c++17"
+            }
+        }
+        ndk {
+                abiFilters 'arm64-v8a', 'x86_64'
+        }
+    }
+    applicationVariants.configureEach { variant ->
+        variant.outputs.configureEach {
+            outputFileName = "kinesis_salesdemo.apk"
+        }
+    }
+
+    buildTypes {
+        debug {
+            shrinkResources false
+            minifyEnabled false
+            debuggable true
+            getIsDefault().set(true)
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+        }
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+
+    packagingOptions {
+        resources {
+            pickFirst '**/META-INFMANIFEST.MF'
+            pickFirst '**/libkinesis.so'
+            pickFirst '**/libfoonathan_memory-0.7.1.so'
+            pickFirst '**/libfastrtps.so'
+            pickFirst '**/libfastcdr.so'
+        }
+        resources.excludes.add("$rootProject.projectDir/kinesis_sdk/libkinesis/*")
+    }
+    ndkVersion = '26.2.11394342'
+    externalNativeBuild {
+        cmake {
+            path "src/main/cpp/CMakeLists.txt"
+            version "3.22.1"
+        }
+    }
+
+}
+
+java {
+    toolchain {
+        languageVersion.set(JavaLanguageVersion.of(17))
+    }
+}
+
+dependencies {
+
+    implementation libs.androidx.appcompat
+    implementation libs.androidx.constraintlayout
+
+    //Below: Required dependencies from Kinesis SDK
+    implementation libs.gson
+    implementation libs.androidx.security.crypto
+    implementation libs.androidx.core.ktx
+    def sdk_path = "$project.projectDir/../kinesis_sdk/aar"
+    implementation fileTree(dir: "${sdk_path}", include: ['*.aar'])
+}
+

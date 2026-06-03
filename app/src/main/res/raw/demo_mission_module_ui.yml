@@ -1,0 +1,14 @@
+mission_module:
+  - poi_select:
+      id: 'poi_sel_1'
+  - button:
+      id: 'push_me_button'
+      label: 'Push Me'
+  - info:
+      label: 'Static'
+  - text:
+      id: 'text_field_1'
+      label: 'default text'
+  - check:
+      id: 'main_check'
+      label: 'Check Label'
