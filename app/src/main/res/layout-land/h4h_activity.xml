@@ -60,7 +60,7 @@
                         android:hint="@string/platform_name"
                         android:imeOptions="actionDone"
                         android:inputType="text"
-                        android:text="rad_teal" />
+                        android:text="rad_c100" />
 
                     <Spinner
                         android:id="@+id/platform1Spinner"
@@ -107,7 +107,7 @@
                         android:hint="@string/statusPort"
                         android:imeOptions="actionDone"
                         android:inputType="number"
-                        android:text="5566" />
+                        android:text="5561" />
 
 
                 </TableRow>
@@ -125,7 +125,6 @@
                         android:layout_weight="1"
                         android:ems="10"
                         android:hint="@string/cam_address"
-                        android:text="@string/teal_cam_url"
                         android:imeOptions="actionDone" />
 
 
@@ -199,7 +198,7 @@
                         android:hint="@string/platform_name"
                         android:imeOptions="actionDone"
                         android:inputType="text"
-                        android:text="mtrs_chassis" />
+                        android:text="rad_teal" />
 
                     <Spinner
                         android:id="@+id/platform2Spinner"
@@ -266,7 +265,7 @@
                         android:ems="10"
                         android:hint="@string/cam_address"
                         android:imeOptions="actionDone"
-                        android:text="rtsp://192.168.1.1:8554/sensor_1000.stm" />
+                        android:text="@string/teal_cam_url" />
 
                 </TableRow>
 
@@ -341,7 +340,7 @@
                         android:hint="@string/platform_name"
                         android:imeOptions="actionDone"
                         android:inputType="text"
-                        android:text="mtrs_gripper" />
+                        android:text="mtrs_chassis" />
 
                     <Spinner
                         android:id="@+id/platform3Spinner"
@@ -403,6 +402,7 @@
                         android:layout_weight="1"
                         android:ems="10"
                         android:hint="@string/cam_address"
+                        android:text="@string/mtrs_cam_url"
                         android:imeOptions="actionDone" />
                 </TableRow>
 
@@ -436,7 +436,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:padding="3sp"
-                android:visibility="gone">
+                android:visibility="visible">
 
                 <TableRow
                     android:layout_width="match_parent"
@@ -473,7 +473,7 @@
                         android:layout_weight="1"
                         android:autofillHints="Name"
                         android:hint="@string/platform_name"
-                        android:text="rlac_v60"
+                        android:text="mtrs_gripper"
                         android:imeOptions="actionDone"
                         android:inputType="text" />
 
@@ -539,7 +539,6 @@
                         android:layout_weight="1"
                         android:ems="10"
                         android:hint="@string/cam_address"
-                        android:text="rtsp://192.168.168.105:4000/fl"
                         android:imeOptions="actionDone" />
 
 

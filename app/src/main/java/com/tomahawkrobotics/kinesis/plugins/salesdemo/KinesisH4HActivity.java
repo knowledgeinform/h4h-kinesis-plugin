@@ -289,22 +289,22 @@ public class KinesisH4HActivity extends AppCompatActivity {
         Spinner spinner2 = findViewById(R.id.platform2Spinner);
         ArrayAdapter<CharSequence> adapter2 = ArrayAdapter.createFromResource(this, R.array.uxv_types, android.R.layout.simple_spinner_item);
         spinner2.setAdapter(adapter2);
-        spinner2.setSelection(adapter2.getPosition("UGV"));
+        spinner2.setSelection(adapter2.getPosition("UAV"));
 
         Spinner spinner3 = findViewById(R.id.platform3Spinner);
         ArrayAdapter<CharSequence> adapter3 = ArrayAdapter.createFromResource(this, R.array.uxv_types, android.R.layout.simple_spinner_item);
         spinner3.setAdapter(adapter3);
-        spinner3.setSelection(adapter3.getPosition("Manipulator"));
+        spinner3.setSelection(adapter3.getPosition("UGV"));
 
         Spinner spinner4 = findViewById(R.id.platform4Spinner);
         ArrayAdapter<CharSequence> adapter4 = ArrayAdapter.createFromResource(this, R.array.uxv_types, android.R.layout.simple_spinner_item);
         spinner4.setAdapter(adapter4);
-        spinner4.setSelection(adapter4.getPosition("Quadruped"));
+        spinner4.setSelection(adapter4.getPosition("Manipulator"));
 
         Spinner spinner5 = findViewById(R.id.platform5Spinner);
         ArrayAdapter<CharSequence> adapter5 = ArrayAdapter.createFromResource(this, R.array.uxv_types, android.R.layout.simple_spinner_item);
         spinner5.setAdapter(adapter5);
-        spinner1.setSelection(adapter1.getPosition("UGV"));
+//        spinner1.setSelection(adapter5.getPosition("UGV"));
 
         Spinner spinner6 = findViewById(R.id.platform6Spinner);
         ArrayAdapter<CharSequence> adapter6 = ArrayAdapter.createFromResource(this, R.array.uxv_types, android.R.layout.simple_spinner_item);

@@ -257,12 +257,16 @@ private:
  */
     zmq::socket_t status_socket;
     bool feedback_ = false;
+    bool status_recv = false;
 
   // Rate to send commands through ZMQ
   static constexpr double zmqSendRateHz =10.0;
   int counter = 0;
   bool send_zmq = false;
+  bool send_zmq_action = false;
+  bool send_zmq_param = false;
 
+  std::string sender;
     /**
    * Time of last update
    */
@@ -289,21 +293,77 @@ private:
   double takeoff_altitude_ = 3.0;
 
   /**
-   * Enumeration of the vehicle's states
+   * Kinesis-facing vehicle state.
+   *
+   * For UAVs, transitions between kLanded and kFlying are driven by confirmed
+   * armed telemetry, not by the Arm button.
    */
   enum class VehicleState
   {
-    kLanded,
-    kFlying,
-    kAutonomy,
-    kManual,
+      kLanded,
+      kFlying,
+      kAutonomy,
+      kTeleop,
+  };
+
+  VehicleState vehicle_state_ = VehicleState::kTeleop;
+
+  /**
+   * UAV flight mode reported by status telemetry.
+   */
+  enum class UavFlightMode
+  {
+//      kManual,
+      kPosition,
+      kHold,
+      kOffboard,
   };
 
   /**
-   * Vehicle state
+   * One-shot arm/disarm command waiting to be transmitted.
+   *
+   * Sending this command does not directly change vehicle_state_.
    */
-  VehicleState vehicle_state_ = VehicleState::kManual;
+  enum class ArmCommand
+  {
+      kNone,
+      kArm,
+      kDisarm,
+  };
 
+  /**
+   * Converts a UAV mode enum to its protocol string.
+   */
+  std::string getUavMode(UavFlightMode mode) const;
+
+  /**
+   * Updates Kinesis state using confirmed UAV armed telemetry.
+   */
+  void updateArmStateFromTelemetry(bool armed);
+
+  /**
+   * Queues one arm or disarm command for transmission.
+   */
+  void queueArmCommand(ArmCommand command);
+
+  bool isArmCommandQueued() const;
+  bool isDisarmCommandQueued() const;
+
+  std::string uav_mode_request = "HOLD";
+
+  UavFlightMode uav_mode = UavFlightMode::kHold;
+
+  /**
+   * Last armed state reported by the UAV.
+   *
+   * This is the source of truth for the Arm action.
+   */
+  bool telemetry_armed_ = false;
+
+  /**
+   * One-shot arm or disarm request waiting to be transmitted.
+   */
+  ArmCommand pending_arm_command_ = ArmCommand::kNone;
   /**
    * Location
    */
@@ -343,6 +403,20 @@ private:
    * Display name for the test parameter
    */
   static constexpr char kParameterDisplayName[] = "Has Toggle Parameter";
+
+  std::string failsafe_parameter = "LAND";
+
+  static inline std::string kFailSafeParamDisplayName = "COMMS LOST BEHAVIOR";
+  static inline std::vector<std::string> kFailSafeOptions = {"LAND", "RTL", "HOVER"};
+
+  double rtl_altitude = 20.0;
+  double max_altitude = 50.0;
+
+  static inline std::string kRtlAltitudeParamDisplayName = "RTL Altitude";
+  static inline std::string kMaxAltitudeParamDisplayName = "Max Altitude";
+
+  static inline std::string kUavModeDisplayName = "REQUEST UAV MODE";
+  static inline std::vector<std::string> kUavModeOptions = {"POSITION", "HOLD", "OFFBOARD"}; //removed manual
 
   /**
    * Linear velocity limit along the X and Y axes

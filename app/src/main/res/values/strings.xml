@@ -28,8 +28,12 @@
     <string name="add_uxv">Add UxV</string>
     <string name="started">Started</string>
     <string name="stop">STOP</string>
-    <string name="kxm_ip">192.168.168.20</string>
+    <string name="kxm_ip">192.168.168.90</string>
     <string name="teal_cam_url">rtsp://192.168.168.30:8555/video200-klv</string>
+    <string name="mtrs_cam_url">rtsp://192.168.1.1:8554/sensor_1000.stm</string>
+
+
+    rtsp://192.168.168.105:4000/fl
 
     <string-array name="uxv_types">
         <item>UGV</item>

@@ -4,6 +4,7 @@
 
 #include "agent/h4h_vehicle.h"
 #include "zmq.hpp"
+#include "sdk/notification.h"
 #include <json.hpp>
 #include <regex>
 using json = nlohmann::json;
@@ -53,7 +54,7 @@ DemoH4HVehicle::DemoH4HVehicle(const std::string& node_name, const std::string& 
 //  std::regex pattern(R"((\d{1,3}(\.\d{1,3}){3}\:\d{4}))");
   std::regex pattern(R"(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}:\d{1,5})");
   if (std::regex_match(statusPort_, pattern)) {
-    energy_ratio_ = 0.5;
+//    energy_ratio_ = 0.5;
     std::string status_connection = "tcp://" + statusPort_;
     std::string stat_str = "status connection string: " + status_connection ;
 
@@ -90,118 +91,384 @@ void DemoH4HVehicle::initialize()
   kLog.v << "Initialize Called";
 }
 
-void DemoH4HVehicle::update()
-{
-  long double seconds_since_last_update =
-      std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - time_update_).count() /
-      1000.0;
-  time_update_ = std::chrono::steady_clock::now();
+    void DemoH4HVehicle::update()
+    {
+        const auto update_time = std::chrono::steady_clock::now();
 
-  if (feedback_) {
-    zmq::message_t msg;
-    auto res = status_socket.recv(msg, zmq::recv_flags::dontwait);
-    if (res) {
-      json from_uas = json::parse(msg.to_string());
-      //      debug_to_uav.send(zmq::buffer(from_uas.dump()), zmq::send_flags::none);
-      if (from_uas["messageType"] == "status") {
-        location_.latitude = from_uas["messageData"]["lat"];
-        location_.longitude = from_uas["messageData"]["lon"];
-        location_.altitude = from_uas["messageData"]["alt"];
-        energy_ratio_ = from_uas["messageData"]["powerLevel"];
-      }
-//      if (type_ == "UAV") {
-//        flying_ = from_uas["messageData"]["flying"];
-//        landed_ = from_uas["messageData"]["landed"];
-//      }
-    }
-  }
+        const long double seconds_since_last_update =
+                std::chrono::duration_cast<std::chrono::milliseconds>(
+                        update_time - time_update_).count() /
+                1000.0;
 
-  switch (vehicle_state_) {
-    case VehicleState::kLanded:
-      linear_velocity_ = kinesis::Vector(0.0, 0.0, 0.0);
-      break;
+        time_update_ = update_time;
 
-    case VehicleState::kFlying:
-      break;
+        /*
+         * Process vehicle status.
+         *
+         * Status telemetry is authoritative. Arm/disarm button callbacks only send
+         * requests; they do not directly change vehicle_state_.
+         */
+        if (feedback_)
+        {
+            zmq::message_t msg;
 
-    case VehicleState::kAutonomy:
-      linear_velocity_ = kinesis::Vector(0.0, 0.0, 0.0);
-      break;
+            try
+            {
+                const auto receive_result =
+                        status_socket.recv(msg, zmq::recv_flags::dontwait);
 
-    case VehicleState::kManual:
-      break;
+                if (receive_result)
+                {
+                    status_recv = true;
+                    energy_ratio_ = 0.5;
 
-  }
+                    const json from_uas = json::parse(msg.to_string());
 
-  //Simulate Battery and Signal
-//  energy_ratio_ = 1.0;
-  signal_ratio_ = 1.0;
+                    if (from_uas.value("messageType", "") == "status")
+                    {
+                        const json message_data =
+                                from_uas.value("messageData", json::object());
 
-  // Simulate angular motion
-//  if (vehicle_state_ != VehicleState::kFlying)
-//  {
-  yaw_ += angular_velocity_.z * seconds_since_last_update;
-  if (yaw_ > M_PI)
-  {
-    yaw_ -= M_PI * 2.0;
-  }
-  else if (yaw_ < -M_PI)
-  {
-    yaw_ += M_PI * 2.0;
-  }
-//  }
-  attitude_ = kinesis::Quaternion::getRotationZ(yaw_);
+                        location_.latitude =
+                                message_data.value("lat", location_.latitude);
 
-  // Simulate linear motion in the local-level frame
-  kinesis::Vector displacement = linear_velocity_ * seconds_since_last_update;
-  location_ = location_.getRelativeLocation(displacement.x, displacement.y, displacement.z);
+                        location_.longitude =
+                                message_data.value("lon", location_.longitude);
 
-  if (send_zmq){
-            auto now = std::chrono::steady_clock::now();
-            double time_since_last_message_ms = std::chrono::duration<double, std::milli>(
-            now - last_lin_msg_time).count();
-            if (time_since_last_message_ms > (1000.0 / zmqSendRateHz)) {
-              json data = {
-                {"name", name_},
-                {"linear_x",    linear_velocity_.x},
-                {"linear_y",    -linear_velocity_.y},
-                {"linear_z",    linear_velocity_.z},
-                {"angular_z",  -angular_velocity_.z}
-              };
+                        location_.altitude =
+                                message_data.value("alt", location_.altitude);
 
-              if (type_ == "UAV") {
-                  json uav = {
-                          {"actions", {
-                                  {"arm", (vehicle_state_ == VehicleState::kFlying)},
-                                  {"disarm", (vehicle_state_ == VehicleState::kLanded)},
-                                  {"autonomy", (vehicle_state_ == VehicleState::kAutonomy)}
-                          }
-                          }
-                  };
-                  data.update(uav);
-              }
-              else {
-                json actions = {
-                        {"actions", {
-                                {"autonomy", (vehicle_state_ == VehicleState::kAutonomy)}
+                        energy_ratio_ =
+                                message_data.value("powerLevel", energy_ratio_);
+
+                        if (type_ == "UAV")
+                        {
+                            /*
+                             * Armed telemetry controls the state transition:
+                             *
+                             * armed == true:
+                             *   kLanded/kTeleop -> kFlying
+                             *
+                             * armed == false:
+                             *   any state -> kLanded
+                             *
+                             * A failed arm therefore remains kLanded.
+                             * A failed disarm remains kFlying or kAutonomy.
+                             */
+                            if (message_data.contains("armed"))
+                            {
+                                if (message_data["armed"].is_boolean())
+                                {
+                                    updateArmStateFromTelemetry(
+                                            message_data["armed"].get<bool>());
+                                }
+                                else
+                                {
+                                    kLog.w << "Ignoring non-boolean armed status field";
+                                }
+                            }
+
+                            /*
+                             * Preserve the current mode when flight_mode is missing.
+                             */
+                            const std::string current_uav_mode =
+                                    getUavMode(uav_mode);
+
+                            const std::string incoming_uav_mode =
+                                    message_data.value(
+                                            "flight_mode",
+                                            current_uav_mode);
+
+                            if (incoming_uav_mode != current_uav_mode)
+                            {
+                                auto notification =
+                                        kinesis::Notification::build(
+                                                kinesis::Notification::Severity::kStatus,
+                                                name_,
+                                                name_ + " - Flight Mode Changed");
+
+                                notification->setDescription(
+                                        "New Flight Mode: " + incoming_uav_mode);
+
+                                notification->broadcast();
+                            }
+
+                            if (incoming_uav_mode == "HOLD")
+                            {
+                                uav_mode = UavFlightMode::kHold;
+                            }
+                            else if (incoming_uav_mode == "MANUAL")
+                            {
+                                uav_mode = UavFlightMode::kManual;
+                            }
+                            else if (incoming_uav_mode == "POSITION")
+                            {
+                                uav_mode = UavFlightMode::kPosition;
+                            }
+                            else if (incoming_uav_mode == "OFFBOARD")
+                            {
+                                uav_mode = UavFlightMode::kOffboard;
+                            }
+                            else if (incoming_uav_mode != current_uav_mode)
+                            {
+                                kLog.w << "Unknown UAV flight mode received: "
+                                       << incoming_uav_mode;
+                            }
                         }
-                        }
-                };
-                data.update(actions);
-              }
-
-                json msgOut = {
-                      {"messageType", "control"},
-                      {"messageData", data}
-              };
-
-//               send out the message
-              mobility_socket.send(zmq::buffer(msgOut.dump()), zmq::send_flags::none);
-
-              send_zmq = false;
+                    }
+                }
             }
+            catch (const json::exception& e)
+            {
+                kLog.e << "Failed to process status message JSON: "
+                       << e.what();
+            }
+            catch (const zmq::error_t& e)
+            {
+                kLog.e << "Failed to receive status message: "
+                       << e.what();
+            }
+            catch (const std::exception& e)
+            {
+                kLog.e << "Failed to process status message: "
+                       << e.what();
+            }
+        }
+
+        /*
+         * Simulate location and orientation only until real status has been received.
+         */
+        if (!status_recv)
+        {
+            const kinesis::Vector displacement =
+                    linear_velocity_ * seconds_since_last_update;
+
+            location_ =
+                    location_.getRelativeLocation(
+                            displacement.x,
+                            displacement.y,
+                            displacement.z);
+
+            yaw_ += angular_velocity_.z * seconds_since_last_update;
+
+            if (yaw_ > M_PI)
+            {
+                yaw_ -= M_PI * 2.0;
+            }
+            else if (yaw_ < -M_PI)
+            {
+                yaw_ += M_PI * 2.0;
+            }
+
+            attitude_ =
+                    kinesis::Quaternion::getRotationZ(yaw_);
+        }
+
+        /*
+         * Do not call startArm() or stopArm() here.
+         *
+         * Those are operator-action callbacks. Calling them every update would
+         * continuously generate commands and notifications.
+         */
+        switch (vehicle_state_)
+        {
+            case VehicleState::kLanded:
+                linear_velocity_ =
+                        kinesis::Vector(0.0, 0.0, 0.0);
+
+                angular_velocity_ =
+                        kinesis::Vector(0.0, 0.0, 0.0);
+                break;
+
+            case VehicleState::kFlying:
+                break;
+
+            case VehicleState::kAutonomy:
+                linear_velocity_ =
+                        kinesis::Vector(0.0, 0.0, 0.0);
+                break;
+
+            case VehicleState::kTeleop:
+                break;
+        }
+
+        signal_ratio_ = 1.0;
+
+        /*
+         * Movement control message.
+         */
+        if (send_zmq)
+        {
+            const auto now = std::chrono::steady_clock::now();
+
+            const double time_since_last_message_ms =
+                    std::chrono::duration<double, std::milli>(
+                            now - last_lin_msg_time).count();
+
+            if (time_since_last_message_ms >
+                (1000.0 / zmqSendRateHz))
+            {
+                const json data = {
+                        {"name", name_},
+                        {"linear_x", linear_velocity_.x},
+                        {"linear_y", -linear_velocity_.y},
+                        {"linear_z", linear_velocity_.z},
+                        {"angular_z", -angular_velocity_.z}
+                };
+
+                const json msgOut = {
+                        {"messageType", "control"},
+                        {"messageData", data}
+                };
+
+                try
+                {
+                    mobility_socket.send(
+                            zmq::buffer(msgOut.dump()),
+                            zmq::send_flags::none);
+
+                    last_lin_msg_time = now;
+                    send_zmq = false;
+                }
+                catch (const zmq::error_t& e)
+                {
+                    kLog.e << "Failed to send control message: "
+                           << e.what();
+                }
+            }
+        }
+
+        /*
+         * Action message.
+         */
+        if (send_zmq_action)
+        {
+            const auto now = std::chrono::steady_clock::now();
+
+            const double time_since_last_message_ms =
+                    std::chrono::duration<double, std::milli>(
+                            now - last_ang_msg_time).count();
+
+            if (time_since_last_message_ms >
+                (1000.0 / zmqSendRateHz))
+            {
+                json data = {
+                        {"name", name_}
+                };
+
+                if (type_ == "UAV")
+                {
+                    const json uav = {
+                            {"arm", isArmCommandQueued()},
+                            {"disarm", isDisarmCommandQueued()},
+                            {"autonomy",
+                                    vehicle_state_ == VehicleState::kAutonomy},
+                            {"flight_mode",
+                                    uav_mode_request.empty()
+                                    ? getUavMode(uav_mode)
+                                    : uav_mode_request},
+                            {"sender", sender}
+                    };
+
+                    data.update(uav);
+                }
+                else
+                {
+                    const json actions = {
+                            {"autonomy",
+                             vehicle_state_ == VehicleState::kAutonomy}
+                    };
+
+                    data.update(actions);
+                }
+
+                const json msgOut = {
+                        {"messageType", "actions"},
+                        {"messageData", data}
+                };
+
+                kLog.i << "SENDING ACTION MESSAGE"
+                       << ", sender=" << sender
+                       << ", pending_arm_command="
+                       << static_cast<int>(pending_arm_command_)
+                       << ", telemetry_armed="
+                       << (telemetry_armed_ ? "true" : "false")
+                       << ", vehicle_state="
+                       << static_cast<int>(vehicle_state_)
+                       << ", payload="
+                       << msgOut.dump();
+
+                try
+                {
+                    mobility_socket.send(
+                            zmq::buffer(msgOut.dump()),
+                            zmq::send_flags::none);
+
+                    // Don't clear pending_arm_command_ here if
+                    // updateArmStateFromTelemetry() will clear it.
+
+                    last_ang_msg_time = now;
+                    send_zmq_action = false;
+                }
+                catch (const zmq::error_t& e)
+                {
+                    kLog.e << "Failed to send actions message: "
+                           << e.what();
+                }
+            }
+        }
+
+        /*
+         * Parameter message.
+         */
+        if (send_zmq_param)
+        {
+            const auto now = std::chrono::steady_clock::now();
+
+            const double time_since_last_message_ms =
+                    std::chrono::duration<double, std::milli>(
+                            now - last_ang_msg_time).count();
+
+            if (time_since_last_message_ms >
+                (1000.0 / zmqSendRateHz))
+            {
+                json data = {
+                        {"name", name_}
+                };
+
+                if (type_ == "UAV")
+                {
+                    const json uav = {
+                            {"failsafe", failsafe_parameter},
+                            {"rtl_altitude", rtl_altitude},
+                            {"max_altitude", max_altitude}
+                    };
+
+                    data.update(uav);
+                }
+
+                const json msgOut = {
+                        {"messageType", "params"},
+                        {"messageData", data}
+                };
+
+                try
+                {
+                    mobility_socket.send(
+                            zmq::buffer(msgOut.dump()),
+                            zmq::send_flags::none);
+
+                    last_ang_msg_time = now;
+                    send_zmq_param = false;
+                }
+                catch (const zmq::error_t& e)
+                {
+                    kLog.e << "Failed to send parameter message: "
+                           << e.what();
+                }
+            }
+        }
     }
-}
 
 void DemoH4HVehicle::shutdown()
 {
@@ -227,7 +494,13 @@ kinesis::ParameterInterface DemoH4HVehicle::getParameters() const
 {
   std::string display_name = kParameterDisplayName;
   kinesis::ParameterInterface parameters;
-  parameters.addParameterBool(display_name, toggle_parameter_);
+//  parameters.addParameterBool(display_name, toggle_parameter_);
+  if (type_ == "UAV") {
+    parameters.addParameterOption(kFailSafeParamDisplayName, failsafe_parameter, kFailSafeOptions);
+    parameters.addParameterDouble(kRtlAltitudeParamDisplayName, rtl_altitude);
+    parameters.addParameterDouble(kMaxAltitudeParamDisplayName, max_altitude);
+    parameters.addParameterOption(kUavModeDisplayName, getUavMode(uav_mode), kUavModeOptions);
+  }
   return parameters;
 }
 
@@ -238,9 +511,20 @@ void DemoH4HVehicle::changeParameters(const kinesis::ParameterInterface& changed
   std::vector<std::string> display_names = changed_parameters.getDisplayNames();
   for (auto& name : display_names)
   {
-    if (kParameterDisplayName == name)
-    {
-      toggle_parameter_ = changed_parameters.getParameterBool(kParameterDisplayName).value_or(toggle_parameter_);
+    if (name == kFailSafeParamDisplayName || name == kMaxAltitudeParamDisplayName || name == kRtlAltitudeParamDisplayName) {
+      failsafe_parameter = changed_parameters.getParameterOption(kFailSafeParamDisplayName)->selected_option;
+      max_altitude = changed_parameters.getParameterDouble(kMaxAltitudeParamDisplayName).value_or(max_altitude);
+      rtl_altitude = changed_parameters.getParameterDouble(kRtlAltitudeParamDisplayName).value_or(rtl_altitude);
+      sender = "onchange_param";
+      send_zmq_param = true;
+    }
+    else if (name == kUavModeDisplayName) {
+      uav_mode_request = changed_parameters.getParameterOption(kUavModeDisplayName)->selected_option;
+      if (uav_mode_request == getUavMode(uav_mode)) {
+        return;
+      }
+      sender = "new_mode";
+      send_zmq_action = true;
     }
   }
 }
@@ -261,7 +545,7 @@ void DemoH4HVehicle::setLinearVelocity(kinesis::Vector velocity)
   linear_velocity_.x = (std::clamp(velocity.x, -kVelocityLimitLinearXY, kVelocityLimitLinearXY))/kNormalizeVelXY;
   linear_velocity_.y = (std::clamp(velocity.y, -kVelocityLimitLinearXY, kVelocityLimitLinearXY))/kNormalizeVelXY;
   linear_velocity_.z = (std::clamp(velocity.z, -kVelocityLimitLinearZ, kVelocityLimitLinearZ))/kNormalizeVelZ;
-
+  sender = "linear_vel";
   send_zmq = true;
   }
 
@@ -269,63 +553,381 @@ void DemoH4HVehicle::setAngularVelocity(kinesis::Vector velocity)
 {
   //  kLog.v << std::fixed << std::setprecision(2) << "setAngularVelocity " << velocity;
   angular_velocity_.z = (std::clamp(velocity.z, -kVelocityLimitAngularZ, kVelocityLimitAngularZ))/kNormalizeVelAng;
+
+  sender = "angular_vel";
   send_zmq = true;
   }
 
+//void DemoH4HVehicle::updateArmStateFromTelemetry(bool armed)
+//{
+//    const bool armed_state_changed =
+//            telemetry_armed_ != armed;
+//
+//    telemetry_armed_ = armed;
+//
+//    if (!telemetry_armed_)
+//    {
+//        /*
+//         * UAV reports disarmed.
+//         *
+//         * This covers:
+//         * - successful disarm
+//         * - failed arm
+//         * - external disarm
+//         * - failsafe landing followed by disarm
+//         */
+//        vehicle_state_ = VehicleState::kLanded;
+//
+//        linear_velocity_ =
+//                kinesis::Vector(0.0, 0.0, 0.0);
+//
+//        angular_velocity_ =
+//                kinesis::Vector(0.0, 0.0, 0.0);
+//
+////        also add changed_flag here to resend zmq status
+////        if (armed_state_changed) {
+////          send_zmq_action = true
+////        }
+//    }
+//    // else if (telemetry_armed_) { // add flag to do if (telemetry_armed_) as sanity check
+//      // add flag change for pending arm command
+////        if (armed_state_changed) {
+////                pending_arm_command_ = False
+////                vehicle_state_ = VehicleState::kFlying;
+////                send_zmq_action = true
+//    else if (vehicle_state_ == VehicleState::kLanded ||
+//             vehicle_state_ == VehicleState::kTeleop)
+//    {
+//        /*
+//         * UAV reports armed.
+//         *
+//         * Do not overwrite kAutonomy while the UAV remains armed.
+//         */
+//        vehicle_state_ = VehicleState::kFlying;
+//    }
+//
+//    if (armed_state_changed)
+//    {
+//      // don't need this anymore, can do in logic above (only want to send_zmq when pending request is done)
+//      send_zmq_action = true;
+//        kLog.i << "UAV armed telemetry changed to "
+//               << (telemetry_armed_ ? "true" : "false");
+//    }
+//}
+
+void DemoH4HVehicle::updateArmStateFromTelemetry(bool armed)
+{
+    const bool armed_state_changed =
+            telemetry_armed_ != armed;
+
+    telemetry_armed_ = armed;
+
+    if (!telemetry_armed_)
+    {
+        /*
+         * UAV reports disarmed.
+         *
+         * This covers:
+         * - successful disarm
+         * - failed arm
+         * - external disarm
+         * - failsafe landing followed by disarm
+         */
+        vehicle_state_ = VehicleState::kLanded;
+
+        linear_velocity_ =
+                kinesis::Vector(0.0, 0.0, 0.0);
+
+        angular_velocity_ =
+                kinesis::Vector(0.0, 0.0, 0.0);
+
+        /*
+         * Confirm a pending disarm request only when telemetry changes
+         * from armed to disarmed.
+         */
+        if (armed_state_changed)
+        {
+            pending_arm_command_ = ArmCommand::kNone;
+
+            /*
+             * Resend the full action/status message after the pending
+             * disarm request has been confirmed.
+             */
+            sender = "disarm_confirmed";
+            send_zmq_action = true;
+
+            kLog.i << "Pending disarm request confirmed by UAV telemetry";
+        }
+    }
+    else if (telemetry_armed_)
+    {
+        /*
+         * UAV reports armed.
+         *
+         * The explicit telemetry_armed_ check acts as a sanity check.
+         * Do not overwrite kAutonomy while the UAV remains armed.
+         */
+        if (vehicle_state_ == VehicleState::kLanded ||
+            vehicle_state_ == VehicleState::kTeleop)
+        {
+            vehicle_state_ = VehicleState::kFlying;
+        }
+
+        /*
+         * Confirm a pending arm request only when telemetry changes
+         * from disarmed to armed.
+         */
+        if (armed_state_changed)
+        {
+            pending_arm_command_ = ArmCommand::kNone;
+
+            /*
+             * Resend the full action/status message after the pending
+             * arm request has been confirmed.
+             */
+            sender = "arm_confirmed";
+
+            kLog.i << "Pending arm request confirmed by UAV telemetry";
+        }
+    }
+
+    /*
+     * Do not set send_zmq_action here for every telemetry change.
+     * It is now set only when a pending request is confirmed above.
+     */
+    if (armed_state_changed)
+    {
+        kLog.i << "UAV armed telemetry changed to "
+               << (telemetry_armed_ ? "true" : "false");
+    }
+}
+
+void DemoH4HVehicle::queueArmCommand(ArmCommand command)
+{
+    if (type_ != "UAV")
+    {
+        return;
+    }
+
+    if (command == ArmCommand::kArm)
+    {
+        /*
+         * Do not send an arm request when telemetry already reports armed.
+         */
+        if (telemetry_armed_)
+        {
+            return;
+        }
+
+        sender = "startArm";
+        kLog.i << "Queueing one-shot arm request";
+    }
+    else if (command == ArmCommand::kDisarm)
+    {
+        /*
+         * Do not send a disarm request when telemetry already reports disarmed.
+         */
+        if (!telemetry_armed_)
+        {
+            return;
+        }
+
+        sender = "stopArm";
+        kLog.i << "Queueing one-shot disarm request";
+    }
+    else
+    {
+        return;
+    }
+
+    pending_arm_command_ = command;
+
+    kLog.i << "ACTION SEND TRIGGER: queueArmCommand"
+           << ", sender=" << sender
+           << ", arm=" << (isArmCommandQueued() ? "true" : "false")
+           << ", disarm=" << (isDisarmCommandQueued() ? "true" : "false")
+           << ", telemetry_armed="
+           << (telemetry_armed_ ? "true" : "false");
+
+    send_zmq_action = true;
+}
+
+bool DemoH4HVehicle::isArmCommandQueued() const
+{
+    return pending_arm_command_ ==
+           ArmCommand::kArm;
+}
+
+bool DemoH4HVehicle::isDisarmCommandQueued() const
+{
+    return pending_arm_command_ ==
+           ArmCommand::kDisarm;
+}
 
 bool DemoH4HVehicle::isAutonomyEnabled() const
 {
-  return (vehicle_state_ != VehicleState::kAutonomy);
+    if (vehicle_state_ == VehicleState::kAutonomy)
+    {
+        return false;
+    }
+
+    if (type_ == "UAV")
+    {
+        return telemetry_armed_;
+    }
+
+    return true;
 }
 
 bool DemoH4HVehicle::isAutonomyActive() const
 {
-  return (vehicle_state_ == VehicleState::kAutonomy);
+    return vehicle_state_ ==
+           VehicleState::kAutonomy;
 }
 
-void DemoH4HVehicle::startAutonomy() {
-  send_zmq = true;
-  if (vehicle_state_ != VehicleState::kAutonomy) {
+//void DemoH4HVehicle::startAutonomy()
+//{
+//    if (!isAutonomyEnabled())
+//    {
+//        return;
+//    }
+//
+//    vehicle_state_ = VehicleState::kAutonomy;
+//    sender = "start_autonomy";
+//    send_zmq_action = true;
+//}
+
+void DemoH4HVehicle::startAutonomy()
+{
+    if (!isAutonomyEnabled())
+    {
+        kLog.i << "Ignoring autonomy start request because autonomy is not enabled";
+        return;
+    }
+
     vehicle_state_ = VehicleState::kAutonomy;
-  }
+    sender = "start_autonomy";
+
+    kLog.i << "ACTION SEND TRIGGER: startAutonomy"
+           << ", sender=" << sender
+           << ", telemetry_armed="
+           << (telemetry_armed_ ? "true" : "false");
+
+    send_zmq_action = true;
 }
 
-void DemoH4HVehicle::stopAutonomy() {
-  send_zmq = true;
-  if (vehicle_state_ == VehicleState::kAutonomy) {
-    if (type_ == "UAV") {
-      vehicle_state_ = VehicleState::kFlying;
-    }
-    else {
-      vehicle_state_ = VehicleState::kManual;
+//void DemoH4HVehicle::stopAutonomy()
+//{
+//    if (vehicle_state_ != VehicleState::kAutonomy)
+//    {
+//        return;
+//    }
+//
+//    if (type_ == "UAV")
+//    {
+//        vehicle_state_ =
+//                telemetry_armed_
+//                ? VehicleState::kFlying
+//                : VehicleState::kLanded;
+//    }
+//    else
+//    {
+//        vehicle_state_ = VehicleState::kTeleop;
+//    }
+//
+//    sender = "stop_autonomy";
+//    send_zmq_action = true;
+//}
+
+void DemoH4HVehicle::stopAutonomy()
+{
+    if (vehicle_state_ != VehicleState::kAutonomy)
+    {
+        kLog.i << "Ignoring autonomy stop request because autonomy is not active";
+        return;
     }
 
-  }
+    if (type_ == "UAV")
+    {
+        vehicle_state_ =
+                telemetry_armed_
+                ? VehicleState::kFlying
+                : VehicleState::kLanded;
+    }
+    else
+    {
+        vehicle_state_ = VehicleState::kTeleop;
+    }
+
+    sender = "stop_autonomy";
+
+    kLog.i << "ACTION SEND TRIGGER: stopAutonomy"
+           << ", sender=" << sender
+           << ", telemetry_armed="
+           << (telemetry_armed_ ? "true" : "false");
+
+    send_zmq_action = true;
 }
 
 bool DemoH4HVehicle::isArmEnabled() const
 {
-  return (vehicle_state_ == VehicleState::kLanded);
+    /*
+     * The Arm action may start only when confirmed telemetry says the UAV is
+     * disarmed and no arm command is still waiting for local transmission.
+     */
+    return type_ == "UAV" &&
+           !telemetry_armed_;
 }
+
 
 bool DemoH4HVehicle::isArmActive() const
 {
-  return (vehicle_state_ == VehicleState::kFlying || vehicle_state_ == VehicleState::kAutonomy);
+    /*
+     * Strict telemetry-driven status.
+     *
+     * Sending an arm request does not make this action active. The action only
+     * becomes active after the UAV reports armed == true.
+     */
+    return type_ == "UAV" &&
+           telemetry_armed_;
 }
 
-void DemoH4HVehicle::startArm() {
-  send_zmq = true;
-  if (vehicle_state_ != VehicleState::kFlying && vehicle_state_ != VehicleState::kAutonomy) {
-    vehicle_state_ = VehicleState::kFlying;
-  }
+void DemoH4HVehicle::startArm()
+{
+    /*
+     * Send an arm request without changing vehicle_state_.
+     */
+    queueArmCommand(ArmCommand::kArm);
 }
 
-void DemoH4HVehicle::stopArm() {
-  send_zmq = true;
-  // TODOD: add safety thingsss
-  if (vehicle_state_ == VehicleState::kFlying) {
-    vehicle_state_ = VehicleState::kLanded;
-  }
+void DemoH4HVehicle::stopArm()
+{
+    if (type_ != "UAV" || !telemetry_armed_)
+    {
+        return;
+    }
+
+    /*
+     * Retain the existing warning/confirmation behavior, but only queue the
+     * disarm command after confirmation. Do not set kLanded here.
+     */
+    auto notification =
+            kinesis::Notification::build(
+                    kinesis::Notification::Severity::kWarning,
+                    name_,
+                    "Disarm Called while armed.");
+
+    notification->setDescription(
+            "Confirm that the UAV should be disarmed.");
+
+    notification->addButton(
+            "Disarm UAV?",
+            [this]()
+            {
+                queueArmCommand(ArmCommand::kDisarm);
+            });
+
+    notification->broadcast();
 }
 
 kinesis::PlatformInterface DemoH4HVehicle::getPlatform()
@@ -342,7 +944,7 @@ kinesis::PlatformInterface DemoH4HVehicle::getPlatform()
   platform.change_parameters = [this](auto p) { changeParameters(p); };
   platform.frame.get_is_enabled = []() { return true; };
   int axes;
-  if (type_ == "UAV") {
+  if (type_ == "UAV" || type_ == "Manipulator") {
     axes = kinesis::FrameInterface::kAxesLinear | kinesis::FrameInterface::kAxisFreeAngularZ;
   }
   else {
@@ -393,6 +995,18 @@ std::vector<kinesis::ActionInterface> DemoH4HVehicle::getActions()
   action_interfaces.push_back(autonomy);
 
   return action_interfaces;
+}
+std::string DemoH4HVehicle::getUavMode(UavFlightMode mode) const {
+  switch (mode) {
+    case UavFlightMode::kHold:
+      return "HOLD";
+//    case UavFlightMode::kManual:
+//      return "MANUAL";
+    case UavFlightMode::kPosition:
+      return "POSITION";
+    case UavFlightMode::kOffboard:
+      return "OFFBOARD";
+  }
 }
 
 }  // namespace kinesis_example
